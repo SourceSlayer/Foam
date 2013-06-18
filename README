@@ -1,0 +1,12 @@
+Add this point in time, Foam is far from complete and I have not even decided if I want to keep the name Foam. At this point in time, I don't even have a list of features I want to implement.
+
+Here is a list of software Foam uses:
+- Python
+- sys module (in python standard library)
+- PySide
+- Keyring
+
+
+Plans for this project can be found at http://www.github.com/SourceSlayer/wiki/Plans
+
+Thank you!

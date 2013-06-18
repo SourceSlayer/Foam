@@ -1,0 +1,180 @@
+#!/usr/bin/env python
+
+from PySide import QtCore, QtGui, QtWebKit
+import sys
+import keyring
+import foamlib
+
+class Foam:
+	def __init__(self):
+		self.app=QtGui.QApplication(sys.argv)
+		self.app.setApplicationName("Foam")
+		self.app.setApplicationVersion("0.1")
+		self.app.setOrganizationName("SlackingSource")
+		self.app.setOrganizationDomain("SlackingSource.WordPress.com")
+		self.user=foamlib.User(None)
+		self.error=QtGui.QErrorMessage()
+		self.settings=QtCore.QSettings()
+		print(self.settings.fileName())
+		
+		self.window=QtGui.QMainWindow()
+		self.tab_widget=QtGui.QTabWidget()
+		self.tab_widget.setDocumentMode(False)
+		self.user_page=QtWebKit.QWebView()
+		self.tab_widget.addTab(self.user_page, "Users")
+		self.content_page=QtGui.QWidget()
+		l=QtGui.QVBoxLayout()
+		self.content_area=QtGui.QTreeWidget()
+		l.addWidget(self.content_area)
+		self.content_page.setLayout(l)
+		self.tab_widget.addTab(self.content_page, "Content")
+		self.store_page=QtGui.QWidget()
+		l=QtGui.QVBoxLayout()
+		self.store_page.setLayout(l)
+		self.tab_widget.addTab(self.store_page, "Store")
+		self.info_page=QtGui.QWidget()
+		l=QtGui.QVBoxLayout()
+		self.info_page.setLayout(l)
+		self.tab_widget.addTab(self.info_page, "Information")
+		self.window.setCentralWidget(self.tab_widget)
+		self.window.show()
+		
+		self.tray_icon=QtGui.QSystemTrayIcon()
+		self.tray_icon.setIcon(QtGui.QIcon("foam-icon-up.png"))
+		self.tray_icon.setVisible(self.settings.value("tray-visible", True))
+		self.tray_menu=QtGui.QMenu()
+		tray_profile=self.tray_menu.addAction("Profile")
+		tray_profile.triggered.connect(lambda :self.view_page("tab/profile"))
+		tray_friends=self.tray_menu.addAction("Friends")
+		tray_purchases=self.tray_menu.addAction("Purchases")
+		tray_trophies=self.tray_menu.addAction("Trophies")
+		tray_settings=self.tray_menu.addAction("Foam Settings")
+		tray_settings.triggered.connect(self.settings_dialog)
+		self.tray_menu.addSeparator()
+		self.tray_logout=self.tray_menu.addAction("Login")
+		self.tray_logout.triggered.connect(self.authentication_dialog)
+		tray_exit=self.tray_menu.addAction("Quit")
+		tray_exit.setMenuRole(tray_exit.QuitRole)
+		tray_exit.triggered.connect(self.exit)
+		self.tray_icon.setContextMenu(self.tray_menu)
+		
+		if self.user==None:
+			self.authentication_dialog()
+		
+		self.settings.sync()
+		self.app.exec_()
+		
+	def authentication_dialog(self, username=""):
+		d=QtGui.QDialog()
+		d.setWindowTitle("Login to Foam")
+		y=QtGui.QVBoxLayout()
+		h=QtGui.QWidget()
+		l=QtGui.QHBoxLayout()
+		user=QtGui.QLineEdit()
+		user.setText(username)
+		l.addWidget(user)
+		user.setPlaceholderText("Username")
+		pword=QtGui.QLineEdit()
+		pword.setPlaceholderText("Password")
+		pword.setEchoMode(pword.Password)
+		l.addWidget(pword)
+		button=QtGui.QPushButton()
+		button.setText("Login")
+		button.clicked.connect(d.accept)
+		l.addWidget(button)
+		h.setLayout(l)
+		y.addWidget(h)
+		checkbox=QtGui.QCheckBox()
+		checkbox.setText("Remember username and password. (Do not use on public computer)")
+		y.addWidget(checkbox)
+		d.setLayout(y)
+		d.accepted.connect(lambda :self.login(user.text(), pword.text(), (checkbox.checkState()==QtCore.Qt.Checked)))
+		if self.settings.value("default-user")!=None:
+			u=self.settings.value("default-user")
+			user.setText(u)
+			pword.setText(keyring.get_password("foam", u))
+			checkbox.setCheckState(QtCore.Qt.Checked)
+		d.exec_()
+	
+	def login(self, username, password, autologin):
+		try:
+			print(autologin)
+			self.user=foamlib.authenticate(username, password)
+			#self.tray_logout.setText("Logout ("+username+")")
+			if autologin:
+				self.settings.setValue("default-user", username)
+				keyring.set_password("foam", username, password)
+				if self.user_page.url().toString=="":
+					self.user_page.load(self.user.profile_page())
+			else:
+				self.settings.setValue("default-user", None)
+			self.update_self()
+		except foamlib.AuthenticationError:
+			return False
+	
+	def logout(self):
+		try:
+			self.user.logout()
+			self.user=None
+			self.update_self()
+		except foamlib.MissingDataError:
+			self.error.showMessage("You must log in to log out.")
+		
+	def exit(self):
+		self.app.exit()
+	
+	def view_page(self, name):
+		print(name)
+		if name.split("/")[0]=="tab":
+			self.window.show()
+			t=name.split("/")[1]
+			if t=="profile":
+				self.tab_widget.setCurrentWidget(self.user_page)
+				if self.user.username==None:
+					self.error.showMessage("Unable to get profile because no user is logged in.")
+				else:
+					self.user_page.load(self.user.profile_url())
+			elif t=="achievements":
+				self.tab_widget.setCurrentWidget(self.user_page)
+				if self.user.username==None:
+					self.error.showMessage("Unable to get profile because no user is logged in.")
+				else:
+					self.user_page.load(self.user.profile_url()+"/achievements")
+				
+	#def open_url(self, url):#To openpages in correct tab.
+		
+	
+	def update_self(self):
+		if self.user==None:
+			self.tray_logout.setText("Login")
+			self.tray_logout.triggered.connect(self.authentication_dialog)
+			if self.user_page.url().toString()=="":
+				self.user_page.load(self.user.profile_url())
+		else:
+			self.tray_logout.setText("Logout ("+self.user.username+")")
+			self.tray_logout.triggered.disconnect()#self.authentication_dialog)
+			self.tray_logout.triggered.connect(self.logout)
+		
+		self.settings.sync()
+	
+	def settings_dialog(self):
+		self.settings_widget=QtGui.QDialog()
+		l=QtGui.QVBoxLayout()
+		t=QtGui.QTabWidget()
+		l.addWidget(t)
+		b=QtGui.QWidget()
+		bl=QtGui.QHBoxLayout()
+		cancel=QtGui.QPushButton("Cancel")
+		cancel.clicked.connect(self.settings_widget.reject)
+		bl.addWidget(cancel)
+		ok=QtGui.QPushButton("Confirm")
+		ok.clicked.connect(self.settings_widget.accept)
+		bl.addWidget(ok)
+		b.setLayout(bl)
+		l.addWidget(b)
+		self.settings_widget.setLayout(l)
+		self.settings_widget.exec_()
+			
+		
+if __name__=="__main__":
+	f=Foam()
